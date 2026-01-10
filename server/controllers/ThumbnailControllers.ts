@@ -5,6 +5,7 @@ import ai from "../configs/ai.js";
 import path from "path";
 import fs from "fs";
 import {v2 as cloudinary} from 'cloudinary'
+import { Readable } from 'stream';
 
 const stylePrompts = {
     'Bold & Graphic': 'eye-catching thumbnail, bold typography, vibrant colors, expressive facial reaction, dramatic lighting, high contrast, click-worthy composition, professional style',
@@ -24,27 +25,36 @@ const colorSchemeDescriptions = {
     pastel: 'soft pastel colors, low saturation, gentle tones, calm and friendly aesthetic',
 }
 
-export const generateThumbnail = async (req:Request,res:Response)=>{
-    try{
+export const generateThumbnail = async (req:Request,res:Response)=> {
+    try {
 
-        const{userId} = req.session;
-        const{title, prompt:user_prompt, style, aspect_ratio, color_scheme, text_overlay,
+        const {userId} = req.session;
+        const {
+            title, prompt: user_prompt, style, aspect_ratio, color_scheme, text_overlay,
         } = req.body;
 
         const thumbnail = await Thumbnail.create({
-            userId, title, prompt_used:user_prompt, user_prompt, style, aspect_ratio, color_scheme, text_overlay,isGenerating:true
+            userId,
+            title,
+            prompt_used: user_prompt,
+            user_prompt,
+            style,
+            aspect_ratio,
+            color_scheme,
+            text_overlay,
+            isGenerating: true
         })
 
         const model = "gemini-3-pro-image-preview";
 
         const generationConfig: GenerateContentConfig = {
-            maxOutputTokens:32768,
-            temperature:1,
-            topP:0.95,
+            maxOutputTokens: 32768,
+            temperature: 1,
+            topP: 0.95,
             responseModalities: ['IMAGE'],
-            imageConfig:{
-                aspectRatio: aspect_ratio ||'16:9',
-                imageSize:'1K'
+            imageConfig: {
+                aspectRatio: aspect_ratio || '16:9',
+                imageSize: '1K'
             },
             safetySettings: [
                 {
@@ -67,23 +77,23 @@ export const generateThumbnail = async (req:Request,res:Response)=>{
         }
         let prompt = `Create a ${stylePrompts[style as keyof typeof stylePrompts]} for: "${title}" `;
 
-        if(color_scheme) {
+        if (color_scheme) {
             prompt += `Use a ${colorSchemeDescriptions[color_scheme as keyof typeof colorSchemeDescriptions]} color scheme`;
         }
-        if(user_prompt) {
-             prompt+= `Additional details: ${user_prompt}`;
+        if (user_prompt) {
+            prompt += `Additional details: ${user_prompt}`;
         }
-        prompt+= `The thumbnail should be ${aspect_ratio}, visually stunning, and designed to maximize click-through rate. Make it bold, professional and impossible to ignore.`
+        prompt += `The thumbnail should be ${aspect_ratio}, visually stunning, and designed to maximize click-through rate. Make it bold, professional and impossible to ignore.`
 
         //Generate the image using the ai model
-        const response:any = await ai.models.generateContent({
+        const response: any = await ai.models.generateContent({
             model,
             contents: [prompt],
-            config : generationConfig
+            config: generationConfig
         })
 
         // Check if the response is valid
-        if(!response?.candidates?.[0]?.content?.parts?.length){
+        if (!response?.candidates?.[0]?.content?.parts?.length) {
             throw new Error('Unexpected response')
         }
 
@@ -91,34 +101,40 @@ export const generateThumbnail = async (req:Request,res:Response)=>{
 
         let finalBuffer: Buffer | null = null;
 
-        for(const part of parts){
-            if(part.inlineData){
+        for (const part of parts) {
+            if (part.inlineData) {
                 finalBuffer = Buffer.from(part.inlineData.data, 'base64');
             }
         }
+        if (!finalBuffer) {
+            throw new Error('No image data received from AI');
+        }
 
-        const filename = `final-output-${Date.now()}.png`;
-        const filepath = path.join('images', filename);
+        // Upload to Cloudinary using a Stream instead of writing to disk
+        const uploadResult: any = await new Promise((resolve, reject) => {
+            const uploadStream = cloudinary.uploader.upload_stream(
+                {resource_type: 'image', folder: 'thumbnails'},
+                (error, result) => {
+                    if (error) reject(error);
+                    else resolve(result);
+                }
+            );
 
-        // Create the image directory if it doesn't exist
-        fs.mkdirSync('images',{recursive:true});
-
-        fs.writeFileSync(filepath, finalBuffer!);
-
-        const uploadResult = await cloudinary.uploader.upload(filepath, {resource_type: 'image'});
+            const readableStream = new Readable();
+            readableStream.push(finalBuffer);
+            readableStream.push(null);
+            readableStream.pipe(uploadStream);
+        });
 
         thumbnail.image_url = uploadResult.secure_url;
-
         thumbnail.isGenerating = false;
-
         await thumbnail.save();
 
-        res.json({message: 'Thumbnail Generated',thumbnail})
+        res.json({message: 'Thumbnail Generated', thumbnail});
 
-        fs.unlinkSync(filepath);
-    } catch (err:any){
+    } catch (err: any) {
         console.error(err);
-        res.status(500).json({message:err.message});
+        res.status(500).json({message: err.message});
     }
 }
 
