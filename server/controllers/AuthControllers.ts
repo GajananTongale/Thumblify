@@ -24,7 +24,8 @@ export const registerUser = async(req: Request, res: Response) => {
 
         // setting user data in session
         req.session.isLoggedIn = true;
-        req.session.userId = newUser._id;
+        req.session.userId = (newUser._id as any).toString();
+
 
         return res.json({
             message: "Account created successfully",
