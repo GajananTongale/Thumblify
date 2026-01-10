@@ -7,8 +7,15 @@ import MongoStore from 'connect-mongo'
 import AuthRouter from "./Routes/AuthRoutes.js";
 import ThumbnailRouter from "./Routes/ThumbnailRoutes.js";
 import UserRouter from "./Routes/UserRoutes.js";
+import { v2 as cloudinary } from 'cloudinary';
 
 
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+    secure: true // This ensures all generated URLs use https
+});
 declare module 'express-session' {
     interface SessionData {
         isLoggedIn: boolean;
